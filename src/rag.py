@@ -68,7 +68,7 @@ def ask(chain, question: str) -> dict:
     for doc in result.get("context", []):
         source = {
             "content": doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content,
-            "source": os.path.basename(doc.metadata.get("source", "unknown")),
+            "source": doc.metadata.get("source", "unknown").replace("\\", "/").split("/")[-1],
         }
         if source not in sources:
             sources.append(source)
