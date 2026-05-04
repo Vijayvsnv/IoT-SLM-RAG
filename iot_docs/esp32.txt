@@ -1,0 +1,208 @@
+ESP32 Microcontroller - Complete Reference Guide
+
+=== OVERVIEW ===
+The ESP32 is a dual-core 32-bit microcontroller by Espressif Systems. It integrates Wi-Fi (802.11 b/g/n) and Bluetooth (Classic + BLE 4.2) connectivity, making it ideal for IoT applications. The ESP32 runs at up to 240 MHz and includes 520 KB SRAM with support for external flash up to 16 MB.
+
+=== TECHNICAL SPECIFICATIONS ===
+- CPU: Xtensa LX6 dual-core, 32-bit, up to 240 MHz
+- ROM: 448 KB
+- SRAM: 520 KB
+- Flash: External SPI flash, typically 4 MB (up to 16 MB)
+- Wi-Fi: 802.11 b/g/n, 2.4 GHz
+- Bluetooth: Classic BT v4.2 and BLE
+- GPIO: 34 programmable GPIO pins
+- ADC: 12-bit SAR ADC, 18 channels
+- DAC: 8-bit DAC, 2 channels
+- UART: 3 interfaces
+- SPI: 4 interfaces
+- I2C: 2 interfaces
+- I2S: 2 interfaces
+- PWM: LED PWM controller with up to 16 channels
+- Operating voltage: 3.3V (5V tolerant on some pins)
+- Operating temperature: -40°C to +85°C
+- Power consumption: ~240 mA peak during Wi-Fi TX, ~10 µA in deep sleep
+
+=== PIN REFERENCE ===
+GPIO0  - Boot mode pin (must be HIGH for normal boot, pull LOW to flash)
+GPIO1  - TX0 (UART0 Transmit) - used for serial monitor
+GPIO2  - Onboard LED on most dev boards; must be LOW or floating at boot
+GPIO3  - RX0 (UART0 Receive)
+GPIO4  - General purpose IO, supports ADC, DAC, PWM
+GPIO5  - SPI CS; must be HIGH at boot
+GPIO6-11 - Connected to internal flash - DO NOT USE
+GPIO12 - Must be LOW at boot (affects flash voltage)
+GPIO13 - General purpose IO
+GPIO14 - SPI CLK
+GPIO15 - Must be HIGH at boot (enables boot messages)
+GPIO16 - RX2 / PSRAM CS
+GPIO17 - TX2
+GPIO18 - SPI CLK (VSPI)
+GPIO19 - SPI MISO (VSPI)
+GPIO21 - I2C SDA
+GPIO22 - I2C SCL
+GPIO23 - SPI MOSI (VSPI)
+GPIO25 - DAC1, ADC2_CH8
+GPIO26 - DAC2, ADC2_CH9
+GPIO27 - ADC2_CH7
+GPIO32 - ADC1_CH4, touch sensor
+GPIO33 - ADC1_CH5, touch sensor
+GPIO34 - ADC1_CH6, input only
+GPIO35 - ADC1_CH7, input only
+GPIO36 - ADC1_CH0, input only (VP)
+GPIO39 - ADC1_CH3, input only (VN)
+
+=== WI-FI SETUP ===
+
+Station Mode (connect to existing router):
+
+#include <WiFi.h>
+
+const char* ssid = "YourNetworkName";
+const char* password = "YourPassword";
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\nConnection failed. Check credentials.");
+  }
+}
+
+Access Point (AP) Mode:
+
+#include <WiFi.h>
+
+const char* ap_ssid = "ESP32-AP";
+const char* ap_password = "12345678";
+
+void setup() {
+  WiFi.softAP(ap_ssid, ap_password);
+  Serial.println("AP IP: " + WiFi.softAPIP().toString());
+}
+
+=== WI-FI STATUS CODES ===
+WL_IDLE_STATUS (0)       - Wi-Fi is in idle state
+WL_NO_SSID_AVAIL (1)     - SSID not found in scan
+WL_SCAN_COMPLETED (2)    - Scan completed
+WL_CONNECTED (3)         - Successfully connected
+WL_CONNECT_FAILED (4)    - Connection failed (wrong password or BSSID issue)
+WL_CONNECTION_LOST (5)   - Connection dropped unexpectedly
+WL_DISCONNECTED (6)      - Disconnected from AP
+
+=== COMMON ERRORS AND FIXES ===
+
+Error: WL_CONNECT_FAILED (status 4)
+Cause: Wrong password, MAC filtering on router, or ESP32 not in range
+Fix:
+- Double-check SSID and password (case sensitive)
+- Move closer to router
+- Disable MAC filtering on router
+- Try: WiFi.disconnect(true); delay(1000); WiFi.begin(ssid, password);
+
+Error: Brownout detector was triggered
+Cause: Insufficient power supply, ESP32 drawing too much current
+Fix:
+- Use a 5V/2A USB power supply
+- Add 100µF capacitor between VIN and GND
+- Add 10µF + 0.1µF decoupling capacitors near ESP32 power pins
+- Avoid powering via USB 2.0 hub
+
+Error: Guru Meditation Error: Core 0 panic'ed (LoadProhibited)
+Cause: Null pointer dereference or stack overflow
+Fix:
+- Increase stack size in task creation: xTaskCreate(task, "name", 8192, NULL, 1, NULL)
+- Check for uninitialized pointers
+- Enable stack overflow detection in menuconfig
+
+Error: rst:0x1 (POWERON_RESET) - bootloop
+Cause: Crash during setup, usually a memory issue
+Fix:
+- Reduce global variable usage
+- Use PROGMEM for constant strings
+- Check for infinite loops calling delay() inside ISR
+
+Error: flash read err,1000
+Cause: Corrupted flash or incorrect boot mode
+Fix:
+- Hold BOOT button while pressing EN/RST
+- Erase flash: esptool.py --chip esp32 erase_flash
+- Re-flash firmware
+
+=== DEEP SLEEP AND POWER MANAGEMENT ===
+
+#include <esp_sleep.h>
+
+#define SLEEP_DURATION 30  // seconds
+
+void setup() {
+  Serial.begin(115200);
+
+  // Configure wake-up source
+  esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
+
+  // Or wake on GPIO pin (active low)
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 0);
+
+  Serial.println("Going to sleep...");
+  Serial.flush();
+  esp_deep_sleep_start();
+}
+
+Power consumption in sleep modes:
+- Active (Wi-Fi TX): ~240 mA
+- Active (CPU only): ~30-50 mA
+- Modem sleep: ~15-20 mA
+- Light sleep: ~0.8 mA
+- Deep sleep: ~10-150 µA (depending on RTC peripherals)
+- Hibernation: ~2.5 µA
+
+=== OTA (OVER THE AIR) UPDATES ===
+
+#include <ArduinoOTA.h>
+
+void setup() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  ArduinoOTA.setHostname("esp32-iot-device");
+  ArduinoOTA.setPassword("admin123");
+
+  ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
+  ArduinoOTA.onEnd([]() { Serial.println("OTA End"); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.begin();
+}
+
+void loop() {
+  ArduinoOTA.handle();
+}
+
+=== RECOMMENDED LIBRARIES ===
+- WiFi.h (built-in)
+- HTTPClient.h (built-in) - for HTTP requests
+- ArduinoJson - JSON parsing
+- PubSubClient - MQTT
+- ESP32Servo - servo motor control
+- Adafruit Unified Sensor - sensor abstraction
+- DHT sensor library - DHT11/22
+
+=== BOARD VARIANTS ===
+ESP32-WROOM-32: Standard module, 4 MB flash
+ESP32-WROVER: Includes 8 MB PSRAM, suitable for image processing
+ESP32-S2: Single core, USB OTG, no Bluetooth
+ESP32-S3: Dual core, USB OTG, AI acceleration, BLE 5
+ESP32-C3: RISC-V core, BLE 5, lower cost
+ESP32-C6: Wi-Fi 6, BLE 5, Zigbee/Thread support

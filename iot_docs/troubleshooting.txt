@@ -1,0 +1,129 @@
+IoT Troubleshooting Guide - Common Problems and Solutions
+
+=== WI-FI CONNECTIVITY ISSUES ===
+
+Q1: ESP32 shows WL_CONNECT_FAILED (status code 4) - what does this mean?
+A: WL_CONNECT_FAILED means the ESP32 attempted to connect but the AP rejected it. Most common causes:
+1. Wrong password (most common) - SSID and password are case-sensitive
+2. Router has MAC filtering enabled - add ESP32's MAC to allowed list
+3. Router only supports WPA3 and ESP32 firmware is older
+4. Hidden SSID not configured properly
+Fix: Try WiFi.begin(ssid, password, 0, bssid, true) with explicit BSSID if multiple APs share same SSID. Also try: WiFi.disconnect(true); delay(3000); WiFi.begin(ssid, password);
+
+Q2: ESP32 connects to WiFi but immediately disconnects
+A: This is usually a power supply issue. When ESP32 transmits WiFi, it can draw 400mA+ peak current.
+Fix: Use 5V/2A power adapter. Add 470µF electrolytic + 0.1µF ceramic capacitor between VIN and GND. Check USB cable quality (many cheap cables have high resistance).
+
+Q3: WiFi connection drops every few hours on battery-powered device
+A: Background connections and beacon intervals drain battery and sometimes cause instability.
+Fix: Use WiFi.setSleep(true) to enable modem sleep. Configure: WiFi.setTxPower(WIFI_POWER_8_5dBm) to reduce transmit power. Implement reconnection logic with exponential backoff.
+
+Q4: Cannot find WiFi network (WL_NO_SSID_AVAIL)
+A: ESP32 cannot see the SSID during scan.
+Fix: Ensure 2.4 GHz band is enabled (ESP32 does not support 5 GHz). Move closer to router. Check SSID is broadcasting (disable hidden network for testing). Run WiFi.scanNetworks() and print results to verify.
+
+Q5: "WiFi.localIP() returns 0.0.0.0" after connecting
+A: Connected to AP but DHCP lease not obtained yet.
+Fix: Wait longer after WL_CONNECTED: while (WiFi.localIP() == IPAddress(0,0,0,0)) delay(100); Or assign static IP: WiFi.config(staticIP, gateway, subnet, dns1);
+
+Q6: ESP32 won't connect to enterprise WPA2 (PEAP/MSCHAPV2) network
+A: ESP32 supports WPA2 Enterprise. Requires special setup.
+Fix: Use WiFi.begin() with certificate parameters or use WiFi.beginEnterprise(ssid, user, pass, identity, ca_cert).
+
+=== MQTT ISSUES ===
+
+Q7: MQTT client keeps disconnecting every 60 seconds
+A: Keep-alive timeout. The broker closes connection if no PINGREQ received within keep-alive period.
+Fix: Set keep-alive correctly: mqttClient.setKeepAlive(120); and ensure mqttClient.loop() is called frequently in the main loop. Do not use long delay() calls that block the MQTT loop.
+
+Q8: MQTT messages not arriving at subscriber even though publisher succeeds
+A: Topic mismatch is the most common cause.
+Fix: Topics are case-sensitive. "Home/Temp" ≠ "home/temp". Use mosquitto_sub -v to see all messages: mosquitto_sub -h broker -t '#' -v. Check if subscriber is connected before publisher sends. Enable QoS 1 on both sides.
+
+Q9: MQTT publish returns false / rc=-1 on Arduino/ESP32
+A: The MQTT client is disconnected when trying to publish.
+Fix: Check connection before publish: if (!mqttClient.connected()) reconnect(); Then publish. Also set larger buffer: mqttClient.setBufferSize(1024) for large JSON payloads. Default PubSubClient buffer is only 256 bytes.
+
+Q10: Broker shows "too many connections" error
+A: You're connecting with the same client ID from multiple devices or not disconnecting properly.
+Fix: Each MQTT client must have a unique client ID. Use: String clientId = "ESP32-" + String(ESP.getEfuseMac(), HEX); Never reuse client IDs across devices.
+
+Q11: MQTT messages arrive out of order
+A: QoS 0 does not guarantee order. Network reordering.
+Fix: Add sequence numbers to payload: {"seq": 42, "temp": 23.5}. Use QoS 1 or 2 for ordered delivery requirements. Implement reordering buffer on subscriber side.
+
+Q12: Large MQTT payload gets truncated or causes crash on ESP32
+A: PubSubClient default buffer is 256 bytes. JSON payloads can exceed this.
+Fix: Before connecting: mqttClient.setBufferSize(2048); Alternatively use DynamicJsonDocument and stream-style serialization to stay under limit.
+
+=== SENSOR ISSUES ===
+
+Q13: DHT11/DHT22 always returns NaN or "Failed to read"
+A: Reading failure means the timing communication broke down.
+Fix: 1. Add 4.7kΩ–10kΩ pull-up resistor between DATA and VCC. 2. Ensure minimum 2 second delay between readings. 3. Check wiring: VCC=3.3V, DATA=GPIO with pull-up, GND=GND. 4. Try different GPIO pin. 5. Replace sensor (DHT11 fails often after 6-12 months).
+
+Q14: DHT22 reads temperature 2-5°C higher than actual
+A: Sensor self-heating from ESP32 board heat, or calibration offset.
+Fix: Mount sensor away from hot components (at least 5cm). Add enclosure ventilation holes. Apply calibration offset: float corrected = raw_temp - 2.5; Verify with external thermometer.
+
+Q15: HC-SR04 ultrasonic sensor gives inconsistent readings (jumps between values)
+A: Interference, wrong timing, or 5V→3.3V logic level issue on ECHO pin.
+Fix: 1. Add voltage divider on ECHO pin (1kΩ + 2kΩ). 2. Average multiple readings. 3. Add minimum valid range check: if (distance < 2 || distance > 400) skip. 4. Check for nearby objects causing reflections. 5. Increase delay between measurements to 60ms+.
+
+Q16: LM35 reads 0°C or negative values on ESP32
+A: ESP32 ADC input range issue or ADC non-linearity near 0V.
+Fix: Set attenuation: analogSetAttenuation(ADC_11db); for 0-3.3V range. ESP32 ADC is unreliable below ~100mV. For temperatures below 10°C, LM35 output < 100mV. Consider I2C sensors (DS18B20, SHT31) for better accuracy.
+
+Q17: PIR sensor triggers false motion alerts
+A: Electrical noise, temperature changes, or interference from other devices.
+Fix: 1. Reduce sensitivity with Sx potentiometer. 2. Shield sensor from direct airflow (AC vents, fans). 3. Shield from rapid temperature changes. 4. Add 100µF capacitor on PIR VCC pin. 5. Implement debouncing: only trigger if HIGH for >100ms. 6. Use digital filter: require 2-3 consecutive HIGH readings.
+
+=== POWER AND HARDWARE ISSUES ===
+
+Q18: ESP32 restarts randomly with "Brownout detector was triggered"
+A: Power supply cannot supply peak current during WiFi/BT transmit.
+Fix: 1. Use dedicated 5V/2A power supply (not USB 2.0). 2. Add 470µF + 100µF electrolytic capacitors near ESP32. 3. Add 0.1µF ceramic decoupling caps on 3.3V pin. 4. Reduce WiFi TX power: esp_wifi_set_max_tx_power(44); (18 dBm). 5. Avoid waking WiFi abruptly from deep sleep.
+
+Q19: GPIO pins not outputting correct voltage
+A: Multiple possible causes including wrong mode, floating input, or insufficient drive current.
+Fix: Set pin mode explicitly: pinMode(pin, OUTPUT); Check GPIO limitations: GPIO34-39 are input-only. Max current per GPIO is 40mA (12mA safe). Use transistor or MOSFET for loads >20mA. Avoid GPIO6-11 (connected to flash).
+
+Q20: I2C device not found (Wire.begin() scan shows no devices)
+A: Incorrect I2C address, missing pull-ups, or wrong SDA/SCL pins.
+Fix: 1. Run I2C scanner sketch to find device address. Default ESP32 I2C: SDA=GPIO21, SCL=GPIO22. 2. Add 4.7kΩ pull-up resistors from SDA and SCL to 3.3V. 3. Check I2C address with multimeter or datasheet (often 0x76/0x77 for BMP280, 0x3C for SSD1306 OLED). 4. Reduce I2C speed: Wire.begin(21, 22, 100000UL); // 100kHz
+
+Q21: SPI device not responding
+A: CS pin not configured or SPI bus conflict.
+Fix: Ensure CS pin is driven LOW during transaction and HIGH after. Set correct SPI mode (CPOL, CPHA). Check MOSI/MISO/CLK are correctly mapped. ESP32 VSPI defaults: MOSI=GPIO23, MISO=GPIO19, CLK=GPIO18, CS=GPIO5.
+
+=== FIRMWARE AND PROGRAMMING ISSUES ===
+
+Q22: "Failed to connect to ESP32: Timed out waiting for packet header" during upload
+A: ESP32 not entering boot mode.
+Fix: Hold BOOT button → Press and release EN/RST → Release BOOT. Or use auto-reset circuit. Lower upload speed in Arduino IDE: 115200 baud.
+
+Q23: ESP32 runs out of heap memory / heap corruption crash
+A: Memory fragmentation or large static allocations.
+Fix: Check free heap: Serial.println(ESP.getFreeHeap()); Use StaticJsonDocument instead of DynamicJsonDocument. Use PROGMEM for constant strings. Increase task stack size for FreeRTOS tasks. Use psramInit() if ESP32-WROVER for large allocations.
+
+Q24: Watchdog timer (WDT) reset / Task watchdog got triggered
+A: A task is blocking the CPU for too long without yielding.
+Fix: Add delay(1) or vTaskDelay(1) in long loops to yield to RTOS. Move heavy computation to separate FreeRTOS task. Avoid blocking while() loops without yield. Call esp_task_wdt_reset() if needed in long operations.
+
+Q25: OTA update fails with "magic byte" or "invalid firmware" error
+A: Wrong partition scheme selected or firmware too large.
+Fix: In Arduino IDE, select Tools → Partition Scheme → "Default 4MB with spiffs" or "Minimal SPIFFS". Ensure OTA partition has enough space. Check firmware size vs available flash.
+
+=== CLOUD AND NETWORK ISSUES ===
+
+Q26: HTTPS request fails with "mbedTLS: SSL handshake failed"
+A: Certificate validation failure or wrong root CA.
+Fix: Add correct root CA: client.setCACert(root_ca); Or disable (not recommended for production): client.setInsecure(); Ensure ESP32 system time is synced (NTP): configTime(0, 0, "pool.ntp.org");
+
+Q27: HTTP POST returns 400 Bad Request when sending JSON
+A: Missing Content-Type header.
+Fix: Add header before sending: http.addHeader("Content-Type", "application/json"); Verify JSON is valid (no trailing commas, proper escaping).
+
+Q28: NTP time sync fails or returns wrong time
+A: Network issue or timezone not configured.
+Fix: configTime(19800, 0, "pool.ntp.org", "time.nist.gov"); // 19800 = UTC+5:30 Wait for sync: while (!time(nullptr)) delay(1000); struct tm timeinfo; getLocalTime(&timeinfo);

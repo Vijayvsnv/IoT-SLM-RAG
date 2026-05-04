@@ -1,0 +1,376 @@
+IoT Sensors - Complete Wiring, Calibration, and Code Reference
+
+=== DHT11 TEMPERATURE & HUMIDITY SENSOR ===
+
+Specifications:
+- Temperature range: 0°C to 50°C (±2°C accuracy)
+- Humidity range: 20% to 90% RH (±5% accuracy)
+- Sampling rate: 1 Hz (once per second maximum)
+- Operating voltage: 3.3V to 5V
+- Single-wire serial communication
+
+Pinout:
+Pin 1 (VCC)  → 3.3V or 5V
+Pin 2 (DATA) → GPIO pin (with 10kΩ pull-up resistor to VCC)
+Pin 3 (NC)   → Not connected
+Pin 4 (GND)  → Ground
+
+Wiring ESP32:
+DHT11 VCC → ESP32 3.3V
+DHT11 GND → ESP32 GND
+DHT11 DATA → ESP32 GPIO4 (with 4.7kΩ–10kΩ resistor to 3.3V)
+
+Arduino C++ Code:
+#include <DHT.h>
+
+#define DHTPIN 4
+#define DHTTYPE DHT11
+
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+}
+
+void loop() {
+  delay(2000);  // DHT11 needs at least 1s between readings
+
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();  // Celsius
+  float tempF = dht.readTemperature(true);    // Fahrenheit
+
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println("Error: Failed to read from DHT11");
+    return;
+  }
+
+  float heatIndex = dht.computeHeatIndex(temperature, humidity, false);
+
+  Serial.printf("Humidity: %.1f%%  Temp: %.1f°C / %.1f°F  Heat Index: %.1f°C\n",
+                humidity, temperature, tempF, heatIndex);
+}
+
+MicroPython Code (ESP32):
+import dht
+import machine
+import time
+
+sensor = dht.DHT11(machine.Pin(4))
+
+while True:
+    try:
+        sensor.measure()
+        temp = sensor.temperature()
+        hum = sensor.humidity()
+        print(f"Temperature: {temp}°C  Humidity: {hum}%")
+    except OSError as e:
+        print(f"Sensor error: {e}")
+    time.sleep(2)
+
+Common DHT11 Errors:
+- "Failed to read" → Check wiring, pull-up resistor, min 2s delay
+- Constant 0% humidity → Damaged sensor, replace
+- Reading -999 or NaN → Data pin wiring issue or missing pull-up
+
+=== DHT22 TEMPERATURE & HUMIDITY SENSOR ===
+
+Specifications:
+- Temperature range: -40°C to +80°C (±0.5°C accuracy)
+- Humidity range: 0% to 100% RH (±2–5% accuracy)
+- Sampling rate: 0.5 Hz (one reading every 2 seconds)
+- Operating voltage: 3.3V to 5V
+- Single-wire serial communication (same protocol as DHT11)
+
+DHT22 is more accurate and has wider range than DHT11. Wiring is identical.
+
+Arduino C++ Code:
+#include <DHT.h>
+
+#define DHTPIN 4
+#define DHTTYPE DHT22
+
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+  delay(2000);  // Allow sensor to stabilize
+}
+
+void loop() {
+  delay(2500);  // DHT22 needs ~2s between readings
+
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  if (isnan(h) || isnan(t)) {
+    Serial.println("DHT22 read failed!");
+    return;
+  }
+
+  Serial.printf("T: %.2f°C  H: %.2f%%\n", t, h);
+}
+
+Calibration offset example:
+const float TEMP_OFFSET = -1.5;  // Sensor reads 1.5°C high
+const float HUM_OFFSET = 3.0;    // Sensor reads 3% low
+
+float corrected_temp = dht.readTemperature() + TEMP_OFFSET;
+float corrected_hum = dht.readHumidity() + HUM_OFFSET;
+
+=== LM35 ANALOG TEMPERATURE SENSOR ===
+
+Specifications:
+- Temperature range: -55°C to +150°C
+- Output: 10 mV per °C (0°C = 0V, 25°C = 250mV)
+- Accuracy: ±0.5°C at 25°C
+- Operating voltage: 4V to 30V
+- No calibration required
+
+Pinout:
+Pin 1 (V+)  → 5V or 3.3V
+Pin 2 (Vout) → ADC pin (analog input)
+Pin 3 (GND) → Ground
+
+Wiring ESP32:
+LM35 V+ → ESP32 3.3V
+LM35 GND → ESP32 GND
+LM35 Vout → ESP32 GPIO34 (ADC1_CH6)
+
+Arduino C++ Code:
+#define LM35_PIN 34
+#define ADC_REF_VOLTAGE 3.3
+#define ADC_RESOLUTION 4095.0  // 12-bit ADC
+
+void setup() {
+  Serial.begin(115200);
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);  // For 0-3.6V input range
+}
+
+void loop() {
+  int rawADC = analogRead(LM35_PIN);
+  float voltage = (rawADC / ADC_RESOLUTION) * ADC_REF_VOLTAGE;
+  float temperature = voltage * 100.0;  // 10mV per °C
+
+  Serial.printf("ADC: %d  Voltage: %.3fV  Temperature: %.2f°C\n",
+                rawADC, voltage, temperature);
+  delay(1000);
+}
+
+MicroPython Code:
+from machine import ADC, Pin
+import time
+
+lm35 = ADC(Pin(34))
+lm35.atten(ADC.ATTN_11DB)    # 0-3.6V range
+lm35.width(ADC.WIDTH_12BIT)  # 12-bit resolution
+
+while True:
+    raw = lm35.read()
+    voltage = (raw / 4095.0) * 3.3
+    temperature = voltage * 100.0
+    print(f"Temp: {temperature:.2f}°C  Raw: {raw}  Voltage: {voltage:.3f}V")
+    time.sleep(1)
+
+Note: ESP32 ADC is non-linear. For better accuracy use averaging or calibration:
+samples = [lm35.read() for _ in range(10)]
+avg_raw = sum(samples) / len(samples)
+
+=== PIR MOTION SENSOR (HC-SR501) ===
+
+Specifications:
+- Detection range: Up to 7 meters
+- Detection angle: 120°
+- Output: Digital HIGH (3.3V) when motion detected
+- Operating voltage: 4.5V to 20V (use 5V)
+- Delay time: Adjustable via potentiometer (0.3s to 300s)
+- Sensitivity: Adjustable via potentiometer
+
+Pinout:
+VCC → 5V (must be 5V for reliable operation)
+GND → Ground
+OUT → GPIO input pin (has built-in voltage divider for 3.3V MCUs on some modules)
+
+Wiring ESP32:
+PIR VCC → 5V (VIN pin on ESP32 dev board)
+PIR GND → ESP32 GND
+PIR OUT → ESP32 GPIO14 (3.3V logic compatible on most modules)
+
+Adjustment:
+- Tx potentiometer (left): Time delay after detection (turn clockwise = longer delay)
+- Sx potentiometer (right): Sensitivity/range (turn clockwise = more sensitive)
+- Jumper: H (Repeatable) mode keeps output HIGH while motion continues; L (Non-repeatable) single pulse
+
+Arduino C++ Code:
+#define PIR_PIN 14
+#define LED_PIN 2
+
+volatile bool motionDetected = false;
+
+void IRAM_ATTR motionISR() {
+  motionDetected = true;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIR_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  // Use interrupt for immediate response
+  attachInterrupt(digitalPinToInterrupt(PIR_PIN), motionISR, RISING);
+
+  delay(30000);  // PIR needs 30 seconds to warm up and stabilize
+  Serial.println("PIR sensor ready");
+}
+
+void loop() {
+  if (motionDetected) {
+    Serial.println("Motion detected!");
+    digitalWrite(LED_PIN, HIGH);
+    delay(1000);
+    digitalWrite(LED_PIN, LOW);
+    motionDetected = false;
+  }
+}
+
+MicroPython Code:
+from machine import Pin
+import time
+
+pir = Pin(14, Pin.IN)
+
+print("Warming up PIR sensor (30 seconds)...")
+time.sleep(30)
+print("PIR ready")
+
+while True:
+    if pir.value() == 1:
+        print("Motion detected!")
+        time.sleep(1)
+    time.sleep(0.1)
+
+=== HC-SR04 ULTRASONIC DISTANCE SENSOR ===
+
+Specifications:
+- Measurement range: 2 cm to 400 cm
+- Accuracy: ±3 mm
+- Operating voltage: 5V (TRIG/ECHO at 3.3V logic with voltage divider)
+- Beam angle: 15 degrees
+- Trigger pulse: 10µs HIGH pulse
+- Frequency: 40 kHz ultrasonic
+
+Pinout:
+VCC  → 5V
+GND  → Ground
+TRIG → GPIO output pin (send 10µs pulse to trigger measurement)
+ECHO → GPIO input pin (receives HIGH pulse proportional to distance)
+
+Voltage Divider for ESP32 ECHO pin (5V → 3.3V):
+ECHO pin → 1kΩ resistor → junction → GPIO
+junction → 2kΩ resistor → GND
+
+Wiring ESP32:
+HC-SR04 VCC → 5V (VIN)
+HC-SR04 GND → GND
+HC-SR04 TRIG → GPIO5
+HC-SR04 ECHO → GPIO18 (through voltage divider)
+
+Arduino C++ Code:
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define SOUND_SPEED 0.0343  // cm/µs at 20°C
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  digitalWrite(TRIG_PIN, LOW);
+}
+
+float measureDistance() {
+  // Send 10µs trigger pulse
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Measure echo pulse duration (timeout at 25ms = ~4.3m max)
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
+
+  if (duration == 0) return -1;  // Timeout/error
+
+  float distance = (duration * SOUND_SPEED) / 2.0;
+  return distance;
+}
+
+void loop() {
+  float dist = measureDistance();
+  if (dist < 0) {
+    Serial.println("Out of range or error");
+  } else {
+    Serial.printf("Distance: %.1f cm\n", dist);
+  }
+  delay(500);
+}
+
+MicroPython Code:
+from machine import Pin, time_pulse_us
+import time
+
+TRIG = Pin(5, Pin.OUT)
+ECHO = Pin(18, Pin.IN)
+
+def measure_distance():
+    TRIG.off()
+    time.sleep_us(2)
+    TRIG.on()
+    time.sleep_us(10)
+    TRIG.off()
+
+    duration = time_pulse_us(ECHO, 1, 25000)
+    if duration < 0:
+        return -1
+    distance = (duration * 0.0343) / 2
+    return distance
+
+while True:
+    dist = measure_distance()
+    if dist < 0:
+        print("Out of range")
+    else:
+        print(f"Distance: {dist:.1f} cm")
+    time.sleep(0.5)
+
+Temperature compensation for accuracy:
+// Speed of sound depends on temperature
+float soundSpeed = 331.4 + (0.606 * temperature_celsius);  // m/s
+float soundSpeedCm = soundSpeed / 10000.0;  // cm/µs
+float distance = (duration * soundSpeedCm) / 2.0;
+
+=== SENSOR CALIBRATION BEST PRACTICES ===
+
+1. Warm-up time: Always allow sensors to stabilize before reading
+   - DHT11/22: 2 seconds minimum
+   - PIR: 30-60 seconds
+   - LM35: 1 second
+   - Gas sensors (MQ series): 20-30 minutes!
+
+2. Averaging: Take multiple readings and average to reduce noise
+   float readings[10];
+   for (int i = 0; i < 10; i++) {
+     readings[i] = readSensor();
+     delay(100);
+   }
+   float avg = 0;
+   for (int i = 0; i < 10; i++) avg += readings[i];
+   avg /= 10;
+
+3. Reference calibration: Compare with a known-accurate reference sensor
+   float offset = reference_value - sensor_value;
+
+4. Environmental interference: Keep sensors away from heat sources, direct sunlight, and airflow vents
+
+5. Proper decoupling: Add 0.1µF capacitor close to sensor power pins to reduce noise
